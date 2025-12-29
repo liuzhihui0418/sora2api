@@ -75,6 +75,7 @@ class ST2ATRequest(BaseModel):
 
 class RT2ATRequest(BaseModel):
     rt: str  # Refresh Token
+    client_id: Optional[str] = None  # Client ID (optional)
 
 class UpdateTokenStatusRequest(BaseModel):
     is_active: bool
@@ -258,7 +259,7 @@ async def st_to_at(request: ST2ATRequest, token: str = Depends(verify_admin_toke
 async def rt_to_at(request: RT2ATRequest, token: str = Depends(verify_admin_token)):
     """Convert Refresh Token to Access Token (only convert, not add to database)"""
     try:
-        result = await token_manager.rt_to_at(request.rt)
+        result = await token_manager.rt_to_at(request.rt, client_id=request.client_id)
         return {
             "success": True,
             "message": "RT converted to AT successfully",
