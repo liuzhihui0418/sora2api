@@ -122,7 +122,7 @@ if __name__ == "__main__":
     from functools import wraps
     from asyncio.proactor_events import _ProactorBasePipeTransport
 
-    # ================= 屏蔽 Windows 报错的黑魔法 =================
+    # ================= 屏蔽 Windows 报错的黑魔法11 =================
     def silence_event_loop_closed(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
