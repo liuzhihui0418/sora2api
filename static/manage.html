@@ -1082,7 +1082,26 @@
             </div>
         </div>
     </div>
+<div id="logDetailModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-background rounded-lg border border-border w-full max-w-3xl shadow-xl my-auto">
+            <div class="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-background z-10">
+                <h3 class="text-lg font-semibold">日志详情</h3>
+                <button onclick="closeLogDetailModal()" class="text-muted-foreground hover:text-foreground transition-colors">
+                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
 
+            <div id="logDetailContent" class="p-5 text-sm overflow-y-auto max-h-[calc(100vh-200px)]">
+                </div>
+
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-border sticky bottom-0 bg-background z-10">
+                <button onclick="closeLogDetailModal()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5 transition-colors">关闭</button>
+            </div>
+        </div>
+    </div>
     <script>
         let allTokens=[],currentPage=1,pageSize=20,selectedTokenIds=new Set(),currentStatusFilter='';
         const $=(id)=>document.getElementById(id),
