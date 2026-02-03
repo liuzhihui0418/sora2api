@@ -14,6 +14,13 @@ from ..services.proxy_manager import ProxyManager
 from ..services.concurrency_manager import ConcurrencyManager
 from ..core.database import Database
 from ..core.models import Token, AdminConfig, ProxyConfig
+import asyncio
+import random
+import aiosqlite
+import os
+from curl_cffi.requests import AsyncSession
+from playwright.async_api import async_playwright
+
 
 router = APIRouter()
 
@@ -27,6 +34,8 @@ scheduler = None
 
 # Store active admin tokens (in production, use Redis or database)
 active_admin_tokens = set()
+
+
 
 def set_dependencies(tm: TokenManager, pm: ProxyManager, database: Database, gh=None, cm: ConcurrencyManager = None, sched=None):
     """Set dependencies"""
@@ -52,6 +61,99 @@ def verify_admin_token(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     return token
+
+
+
+
+
+
+
+from fastapi import File, UploadFile
+import pandas as pd
+import io
+from typing import List, Optional
+import datetime
+
+
+# --- 1. 统一请求模型 ---
+# --- 1. 统一请求模型 (放在 verify_admin_token 下方) ---
+class SingleSaveRequest(BaseModel):
+    email: str
+    st: str
+    user_agent: Optional[str] = None
+
+class BatchExcelConfirmRequest(BaseModel):
+    tokens: List[SingleSaveRequest]
+
+# --- 2. 解析接口 ---
+@router.post("/api/tokens/import/excel-parse")
+async def parse_excel_workspace(file: UploadFile = File(...), token: str = Depends(verify_admin_token)):
+    try:
+        filename = file.filename.lower()
+        contents = await file.read()
+        if filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(contents), encoding='utf-8-sig')
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+        df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+        if 'user_agent' not in df.columns: df['user_agent'] = ""
+        data = df.fillna("").to_dict(orient="records")
+        return {"success": True, "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
+
+# --- 3. 单行保存接口 (全自动转换 AT 逻辑) ---
+@router.post("/api/tokens/import/single-save")
+async def save_single_row_auto(request: SingleSaveRequest, token: str = Depends(verify_admin_token)):
+    try:
+        # 1. 立即执行 ST -> AT 转换
+        conv = await token_manager.st_to_at(
+            session_token=request.st,
+            user_agent=request.user_agent
+        )
+        real_at = conv.get("access_token")
+        if not real_at:
+            raise Exception("OpenAI 接口未返回有效的 Access Token")
+
+        # 2. 调用 token_manager 入库
+        await token_manager.add_token(
+            token_value=real_at,
+            st=request.st,
+            user_agent=request.user_agent,
+            email=request.email,
+            remark="Excel全自动入库",
+            update_if_exists=True,
+        )
+        return {"success": True, "message": f"{request.email} 已换取AT并入库"}
+    except Exception as e:
+        # 这里抛出的错，前端能直接看到
+        raise HTTPException(status_code=400, detail=f"转换失败: {str(e)}")
+
+# --- 4. 批量保存接口 (全自动版) ---
+@router.post("/api/tokens/import/excel-confirm")
+async def confirm_batch_import_auto(request: BatchExcelConfirmRequest, token: str = Depends(verify_admin_token)):
+    success, failed = 0, 0
+    for item in request.tokens:
+        try:
+            conv = await token_manager.st_to_at(item.st, user_agent=item.user_agent)
+            at = conv.get("access_token")
+            if at:
+                await token_manager.add_token(
+                    token_value=at, st=item.st, user_agent=item.user_agent,
+                    email=item.email, update_if_exists=True, is_active=True
+                )
+                success += 1
+            else: failed += 1
+        except: failed += 1
+    return {"success": True, "message": f"批量转换完成！成功: {success}, 失败: {failed}"}
+
+
+
+# 2. 单行保存接口：供前端表格里的“写入”按钮调用
+class SingleSaveRequest(BaseModel):
+    email: str
+    st: str
+    user_agent: Optional[str] = None
 
 # Request/Response models
 class LoginRequest(BaseModel):
@@ -102,6 +204,7 @@ class ImportTokenItem(BaseModel):
     access_token: Optional[str] = None  # Access Token (AT, optional for st/rt modes)
     session_token: Optional[str] = None  # Session Token (ST)
     refresh_token: Optional[str] = None  # Refresh Token (RT)
+    user_agent: Optional[str] = None  # <--- [新增这一行]
     client_id: Optional[str] = None  # Client ID (optional, for compatibility)
     proxy_url: Optional[str] = None  # Proxy URL (optional, for compatibility)
     remark: Optional[str] = None  # Remark (optional, for compatibility)
@@ -598,6 +701,7 @@ async def import_tokens(request: ImportTokensRequest, token: str = Depends(verif
                     token=access_token,
                     st=import_item.session_token,
                     rt=import_item.refresh_token,
+                    user_agent=import_item.user_agent,  # <--- [把这一行加上]
                     client_id=import_item.client_id,
                     proxy_url=import_item.proxy_url,
                     remark=import_item.remark,
@@ -1473,3 +1577,169 @@ async def download_debug_logs(token: str = Depends(verify_admin_token)):
         filename="logs.txt",
         media_type="text/plain"
     )
+
+
+# =================================================================
+# --- 全自动账号录入 (Auto Onboard) 扩展功能 ---
+# =================================================================
+from playwright.async_api import async_playwright
+
+
+# 1. 定义请求模型
+class OnboardRequest(BaseModel):
+    email: str
+
+
+# 2. 内部工具函数：动态生成专属 UA
+def _get_onboard_ios_ua():
+    ios_versions = [("17_4", "17.4"), ("17_6", "17.6"), ("18_0", "18.0"), ("18_1", "18.1")]
+    ver = random.choice(ios_versions)
+    dev = random.choice(["iPhone", "iPad"])
+    webkit = f"605.1.{random.randint(10, 30)}"
+    return f"Mozilla/5.0 ({dev}; CPU {dev} OS {ver[0]} like Mac OS X) AppleWebKit/{webkit} (KHTML, like Gecko) Version/{ver[1]} Mobile/15E148 Safari/604.1"
+
+
+# 3. 内部工具函数：模拟人工输入
+async def _onboard_human_type(page, selector, text):
+    try:
+        await page.wait_for_selector(selector, timeout=20000)
+        await page.click(selector)
+        for char in text:
+            await page.type(selector, char, delay=random.randint(50, 150))
+        await asyncio.sleep(random.uniform(0.5, 1.0))
+        return True
+    except:
+        return False
+
+
+# 4. 核心自动化录入任务
+async def start_onboard_task(email: str):
+    """Playwright 自动化登录并入库任务"""
+    # 这里的配置同步你之前的脚本
+    PASSWORD_VAL = "aini7758258@！！"
+    PROXY_ADDR = "http://43.246.197.192:443"
+    PROXY_USER = "CYfFOZOYdhXd"
+    PROXY_PASS = "n7CSQQspGX"
+
+    async with async_playwright() as p:
+        selected_ua = _get_onboard_ios_ua()
+        # 启动浏览器 (False 表示弹出窗口，True 表示静默)
+        browser = await p.chromium.launch(headless=False, args=['--disable-blink-features=AutomationControlled'])
+
+        context = await browser.new_context(
+            user_agent=selected_ua,
+            viewport={'width': 393, 'height': 852},
+            proxy={
+                "server": PROXY_ADDR,
+                "username": PROXY_USER,
+                "password": PROXY_PASS
+            }
+        )
+
+        page = await context.new_page()
+        # 注入反检测脚本
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+        print(f"🚀 [自动录入] 正在开启环境: {email}")
+
+        try:
+            # 访问登录页
+            await page.goto("https://chatgpt.com/auth/login", wait_until="commit", timeout=60000)
+
+            # A. 处理 Cookie 弹窗
+            try:
+                await page.click(
+                    'button:has-text("全部接受"), button:has-text("Accept all"), button:has-text("全部允许")',
+                    timeout=5000)
+            except:
+                pass
+
+            # B. 处理“登录”起始按钮
+            try:
+                await page.click('button:has-text("登录"), button:has-text("Log in"), [data-testid="login-button"]',
+                                 timeout=8000)
+            except:
+                pass
+
+            # C. 输入邮箱
+            print(f"📧 [自动录入] 填写邮箱: {email}")
+            if await _onboard_human_type(page, 'input[name="username"], input[type="email"]', email):
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(random.uniform(2, 4))
+                # 兼容手动继续
+                try:
+                    await page.click('button:has-text("继续"), button:has-text("Continue")', timeout=3000)
+                except:
+                    pass
+
+            # D. 输入密码
+            print(f"🔑 [自动录入] 填写密码...")
+            # 循环检查密码框是否出现，或者是直接登录成功了
+            for _ in range(10):
+                # 检查是否跳过密码页直接成功了
+                cookies = await context.cookies()
+                if any(c['name'] == '__Secure-next-auth.session-token' for c in cookies):
+                    break
+
+                # 检查人机验证提示
+                content = await page.content()
+                if "Verify you are human" in content:
+                    print("⚠️ [自动录入] 检测到人机验证，请在弹出窗口中手动点击...")
+
+                # 如果密码框出现了
+                if await page.query_selector('input[name="password"]'):
+                    await _onboard_human_type(page, 'input[name="password"]', PASSWORD_VAL)
+                    await page.keyboard.press("Enter")
+                    break
+                await asyncio.sleep(3)
+
+            # E. 监控登录成功并入库
+            print(f"⏳ [自动录入] 监控登录状态...")
+            for _ in range(30):
+                if not browser.is_connected(): break
+
+                cookies = await context.cookies()
+                st_cookie = next((c['value'] for c in cookies if c['name'] == '__Secure-next-auth.session-token'), None)
+
+                if st_cookie:
+                    print(f"🎯 [自动录入] 抓取成功！正在执行 AT 转换并入库...")
+                    # 1. 换取 Access Token
+                    conv = await token_manager.st_to_at(session_token=st_cookie, user_agent=selected_ua)
+                    at = conv.get("access_token")
+
+                    if at:
+                        # 2. 正式存入数据库 (使用真实的 AT，所有信息都会自动更新)
+                        await token_manager.add_token(
+                            token_value=at,
+                            st=st_cookie,
+                            user_agent=selected_ua,
+                            email=email,
+                            remark="全自动录入",
+                            update_if_exists=True
+                        )
+                        print(f"✅ [自动录入] 账号 {email} 已全自动入库成功！")
+                        await asyncio.sleep(2)
+                        break
+                await asyncio.sleep(2)
+
+        except Exception as e:
+            print(f"❌ [自动录入] 任务异常: {str(e)}")
+        finally:
+            await browser.close()
+            print(f"🔒 [自动录入] 浏览器环境已关闭。")
+
+
+# 5. API 接口：启动录入任务
+@router.post("/api/tokens/onboard")
+async def onboard_token_api(request: OnboardRequest, token: str = Depends(verify_admin_token)):
+    email = request.email.strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="邮箱不能为空")
+
+    # 异步启动 Playwright 任务，不阻塞前端请求响应
+    asyncio.create_task(start_onboard_task(email))
+
+    return {
+        "success": True,
+        "message": f"已启动 {email} 的全自动环境，请观察服务器/本地弹出窗口。"
+    }

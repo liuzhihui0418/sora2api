@@ -599,14 +599,16 @@ class GenerationHandler:
                     video_size = model_config.get("size", "small")
 
                     task_id = await self.sora_client.generate_video(
-                        clean_prompt, token_obj.token,
+                        clean_prompt,
+                        token_obj.token,
                         orientation=model_config["orientation"],
                         media_id=media_id,
                         n_frames=n_frames,
                         style_id=style_id,
                         model=sora_model,
                         size=video_size,
-                        token_id=token_obj.id
+                        token_id=token_obj.id,
+                        session_token=token_obj.st  # 👈 必须加上这一行！
                     )
             else:
                 task_id = await self.sora_client.generate_image(

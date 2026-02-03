@@ -47,6 +47,8 @@
                 <button onclick="switchTab('settings')" id="tabSettings" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">系统配置</button>
                 <button onclick="switchTab('logs')" id="tabLogs" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">请求日志</button>
                 <button onclick="switchTab('generate')" id="tabGenerate" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">生成面板</button>
+                <button onclick="switchTab('autoOnboard')" id="tabAutoOnboard" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1 text-purple-600">全自动录入</button>
+                <button onclick="switchTab('excelImport')" id="tabExcelImport" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1 text-blue-600">Excel 导入工作区</button>
             </nav>
         </div>
 
@@ -637,31 +639,81 @@
             <iframe id="generateFrame" src="/static/generate.html" class="w-full" style="border: 0; background: #ffffff; display:block; width:100%; height: 800px;" loading="lazy"></iframe>
         </div>
 
-        <!-- 日志详情模态框 -->
-        <div id="logDetailModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-            <div class="bg-background rounded-lg border border-border w-full max-w-3xl shadow-xl max-h-[80vh] flex flex-col">
-                <div class="flex items-center justify-between p-5 border-b border-border">
-                    <h3 class="text-lg font-semibold">日志详情</h3>
-                    <button onclick="closeLogDetailModal()" class="text-muted-foreground hover:text-foreground">
-                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"/>
-                            <line x1="6" y1="6" x2="18" y2="18"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="p-5 overflow-y-auto">
-                    <div id="logDetailContent" class="space-y-4">
-                        <!-- 动态填充 -->
-                    </div>
+<!-- 全自动录入面板 -->
+<div id="panelAutoOnboard" class="hidden animate-slide-up">
+    <div class="rounded-lg border border-border bg-background p-8 max-w-2xl mx-auto">
+        <div class="text-center mb-8">
+            <h3 class="text-2xl font-bold text-purple-600">全自动账号录入</h3>
+            <p class="text-sm text-muted-foreground mt-2">输入邮箱后，系统会自动弹出浏览器环境。您只需完成登录，剩下的抓取、转换、入库全部自动完成。</p>
+        </div>
+
+        <div class="space-y-6">
+            <div>
+                <label class="text-sm font-bold mb-2 block">账号邮箱</label>
+                <input type="email" id="onboardEmail" class="flex h-12 w-full rounded-xl border border-input bg-background px-4 py-2 text-lg focus:ring-2 focus:ring-purple-500 outline-none" placeholder="example@outlook.com">
+            </div>
+
+            <button onclick="triggerAutoOnboard()" id="btnStartOnboard" class="w-full bg-purple-600 text-white h-12 rounded-xl font-bold text-lg shadow-lg hover:bg-purple-700 transition-all">
+                启动自动环境
+            </button>
+
+            <div id="onboardStatus" class="hidden p-4 rounded-xl bg-purple-50 border border-purple-100">
+                <div class="flex items-center gap-3">
+                    <div class="animate-spin rounded-full h-4 w-4 border-2 border-purple-600 border-t-transparent"></div>
+                    <span class="text-sm text-purple-700 font-medium" id="onboardStatusText">正在初始化浏览器...</span>
                 </div>
             </div>
         </div>
 
-        <!-- 页脚 -->
-        <footer class="mt-12 pt-6 border-t border-border text-center text-xs text-muted-foreground">
-            <p>© 2025 <a href="https://linux.do/u/thesmallhancat/summary" target="_blank" class="no-underline hover:underline" style="color: inherit;">TheSmallHanCat</a> && <a href="https://linux.do/u/tibbar/summary" target="_blank" class="no-underline hover:underline" style="color: inherit;">Tibbar</a>. All rights reserved.</p>
-        </footer>
-    </main>
+        <div class="mt-8 rounded-xl bg-amber-50 p-4 border border-amber-100">
+            <p class="text-xs text-amber-700 leading-relaxed">
+                <b>温馨提示：</b><br>
+                1. 点击启动后，请留意任务栏弹出的新 Chrome 窗口。<br>
+                2. 在窗口内正常登录即可，登录成功进入对话页后，窗口会自动关闭。<br>
+                3. 完成后请手动点击“Token 管理”页面的刷新按钮。
+            </p>
+        </div>
+    </div>
+</div>
+<!-- Excel 导入可编辑工作区 -->
+<div id="panelExcelImport" class="hidden animate-slide-up">
+    <div class="rounded-lg border border-border bg-background p-6">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h3 class="text-xl font-bold text-blue-600">Excel 导入工作区</h3>
+                <p class="text-sm text-muted-foreground mt-1">
+                    一人一号一 UA 模式：上传后可编辑，确认无误后点击“全部入库”。
+                </p>
+            </div>
+            <div class="flex gap-3">
+                <input type="file" id="excelFile" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleExcelUpload(this)">
+                <button onclick="$('excelFile').click()" class="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-slate-700">上传文件</button>
+
+                <!-- 批量按钮：初始隐藏，有数据后显示 -->
+                <button onclick="batchSaveWorkstack()" id="btnBatchConfirm" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-green-700 hidden">全部确认入库</button>
+                <button onclick="clearWorkstack()" id="btnClearStack" class="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-100 hidden">清空列表</button>
+            </div>
+        </div>
+
+        <div class="relative overflow-x-auto border rounded-xl shadow-inner bg-white min-h-[300px]">
+            <table class="w-full text-xs text-left border-collapse">
+                <thead class="bg-slate-50 text-slate-600 font-bold sticky top-0 z-10 border-b">
+                    <tr>
+                        <th class="p-3">Email (账号邮箱)</th>
+                        <th class="p-3">Session Token (ST - 可编辑)</th>
+                        <th class="p-3">User-Agent (专属指纹 - 可编辑)</th>
+                        <th class="p-3 text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="editableTbody" class="divide-y divide-slate-100">
+                    <tr><td colspan="4" class="p-32 text-center text-slate-400 text-sm">请上传 Excel 或 CSV 文件开启导入任务...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+
 
     <!-- 添加 Token 模态框 -->
     <div id="addModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
@@ -1120,7 +1172,7 @@
         saveCallLogicConfig=async()=>{try{const mode=$('cfgCallLogicMode').value||'default';const r=await apiRequest('/api/call-logic/config',{method:'POST',body:JSON.stringify({call_mode:mode})});if(!r)return;const d=await r.json();if(d.success){showToast('调用逻辑配置保存成功','success')}else{showToast('保存失败','error')}}catch(e){showToast('保存失败: '+e.message,'error')}},
         loadPowProxyConfig=async()=>{try{const r=await apiRequest('/api/pow-proxy/config');if(!r)return;const d=await r.json();if(d.success&&d.config){$('cfgPowProxyEnabled').checked=d.config.pow_proxy_enabled||false;$('cfgPowProxyUrl').value=d.config.pow_proxy_url||''}else{console.error('POW代理配置数据格式错误:',d)}}catch(e){console.error('加载POW代理配置失败:',e)}},
         savePowProxyConfig=async()=>{try{const r=await apiRequest('/api/pow-proxy/config',{method:'POST',body:JSON.stringify({pow_proxy_enabled:$('cfgPowProxyEnabled').checked,pow_proxy_url:$('cfgPowProxyUrl').value.trim()})});if(!r)return;const d=await r.json();if(d.success){showToast('POW代理配置保存成功','success')}else{showToast('保存失败','error')}}catch(e){showToast('保存失败: '+e.message,'error')}},
-        switchTab=t=>{const cap=n=>n.charAt(0).toUpperCase()+n.slice(1);['tokens','settings','logs','generate'].forEach(n=>{const active=n===t;$(`panel${cap(n)}`).classList.toggle('hidden',!active);$(`tab${cap(n)}`).classList.toggle('border-primary',active);$(`tab${cap(n)}`).classList.toggle('text-primary',active);$(`tab${cap(n)}`).classList.toggle('border-transparent',!active);$(`tab${cap(n)}`).classList.toggle('text-muted-foreground',!active)});if(t==='settings'){loadAdminConfig();loadProxyConfig();loadPowProxyConfig();loadWatermarkFreeConfig();loadCacheConfig();loadGenerationTimeout();loadATAutoRefreshConfig();loadCallLogicConfig()}else if(t==='logs'){loadLogs()}};
+        switchTab=t=>{const cap=n=>n.charAt(0).toUpperCase()+n.slice(1);['tokens','settings','logs','generate','excelImport','autoOnboard'].forEach(n=>{const active=n===t;$(`panel${cap(n)}`).classList.toggle('hidden',!active);$(`tab${cap(n)}`).classList.toggle('border-primary',active);$(`tab${cap(n)}`).classList.toggle('text-primary',active);$(`tab${cap(n)}`).classList.toggle('border-transparent',!active);$(`tab${cap(n)}`).classList.toggle('text-muted-foreground',!active)});if(t==='settings'){loadAdminConfig();loadProxyConfig();loadPowProxyConfig();loadWatermarkFreeConfig();loadCacheConfig();loadGenerationTimeout();loadATAutoRefreshConfig();loadCallLogicConfig()}else if(t==='logs'){loadLogs()}};
         // 自适应生成面板 iframe 高度
         window.addEventListener('message', (event) => {
             const data = event.data || {};
@@ -1142,6 +1194,284 @@
             }
         });
         window.addEventListener('DOMContentLoaded',()=>{checkAuth();refreshTokens();loadATAutoRefreshConfig()});
+        // --- Excel 导入逻辑 ---
+        let currentParsedTokens = [];
+
+        // 处理文件选择
+        const handleExcelSelect = async (input) => {
+            const file = input.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                showToast('正在解析 Excel...', 'info');
+                const t = localStorage.getItem('adminToken');
+                const r = await fetch('/api/tokens/import/excel-parse', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${t}` },
+                    body: formData
+                });
+
+                const d = await r.json();
+                if (d.success) {
+                    currentParsedTokens = d.data;
+                    renderExcelPreview(d.data);
+                } else {
+                    showToast('解析失败: ' + (d.detail || '未知格式'), 'error');
+                }
+            } catch (e) {
+                showToast('解析请求失败: ' + e.message, 'error');
+            }
+        };
+
+        // 渲染预览表格
+        const renderExcelPreview = (data) => {
+            const tb = $('excelPreviewBody');
+            tb.innerHTML = data.map(t => `
+                <tr>
+                    <td class="p-2 border-b font-medium">${t.email}</td>
+                    <td class="p-2 border-b text-muted-foreground truncate max-w-[200px]" title="${t.st}">${t.st}</td>
+                    <td class="p-2 border-b">${t.user_agent ? `<span class="text-green-600">${t.user_agent.substring(0,30)}...</span>` : '<span class="text-orange-500 italic">将使用默认 iPhone UA</span>'}</td>
+                </tr>
+            `).join('');
+
+            $('excelPreviewCount').textContent = `(共 ${data.length} 条记录)`;
+            $('excelUploadBox').classList.add('hidden');
+            $('excelPreviewSection').classList.remove('hidden');
+        };
+
+        // 确认导入数据库
+        const confirmExcelImport = async () => {
+            if (!currentParsedTokens.length) return;
+            const btn = $('btnConfirmExcelImport');
+            btn.disabled = true;
+            btn.textContent = '正在入库...';
+
+            try {
+                const r = await apiRequest('/api/tokens/import/excel-confirm', {
+                    method: 'POST',
+                    body: JSON.stringify({ tokens: currentParsedTokens })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    showToast(d.message, 'success');
+                    setTimeout(() => switchTab('tokens'), 1500); // 导入成功后自动跳回列表
+                    refreshTokens(); // 刷新列表数据
+                } else {
+                    showToast('导入失败', 'error');
+                }
+            } catch (e) {
+                showToast('提交失败: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '确认导入数据库';
+            }
+        };
+
+        const cancelExcelImport = () => {
+            $('excelPreviewSection').classList.add('hidden');
+            $('excelUploadBox').classList.remove('hidden');
+            $('excelFile').value = '';
+            currentParsedTokens = [];
+        };
+
+        const downloadExcelTemplate = () => {
+            // 简单创建一个包含表头的 CSV/Excel 逻辑，或者直接提示
+            const headers = "email,st,user_agent\nuser1@example.com,eyJhbG...,Mozilla/5.0...";
+            const blob = new Blob([headers], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "sora_import_template.csv";
+            a.click();
+        };
+
+      // --- 批量导入工作区增强版逻辑 ---
+let workstack = [];
+
+// 上传与解析
+async function handleExcelUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    showToast('正在解析...', 'info');
+    const t = localStorage.getItem('adminToken');
+    try {
+        const r = await fetch('/api/tokens/import/excel-parse', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${t}` },
+            body: formData
+        });
+        const res = await r.json();
+        if (res.success) {
+            workstack = res.data;
+            renderWorkstack();
+            showToast(`成功解析 ${res.data.length} 条数据`, 'success');
+        } else {
+            alert("解析失败: " + res.detail);
+        }
+    } catch (e) { alert("网络错误: " + e.message); }
+    input.value = '';
+}
+
+// 渲染表格 (支持实时编辑)
+function renderWorkstack() {
+    const tbody = $('editableTbody');
+    const batchBtn = $('btnBatchConfirm');
+    const clearBtn = $('btnClearStack');
+
+    if (workstack.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="p-32 text-center text-slate-400">列表已空，所有数据已入库或被移除</td></tr>';
+        batchBtn.classList.add('hidden');
+        clearBtn.classList.add('hidden');
+        return;
+    }
+
+    batchBtn.classList.remove('hidden');
+    clearBtn.classList.remove('hidden');
+
+    tbody.innerHTML = workstack.map((item, index) => `
+        <tr class="hover:bg-blue-50/20 transition-colors">
+            <td class="p-2">
+                <input type="text" value="${item.email || ''}"
+                oninput="workstack[${index}].email=this.value"
+                class="w-full border border-slate-200 rounded px-2 py-1.5 focus:border-blue-500 outline-none">
+            </td>
+            <td class="p-2">
+                <input type="text" value="${item.st || ''}"
+                oninput="workstack[${index}].st=this.value"
+                class="w-full border border-slate-200 rounded px-2 py-1.5 focus:border-blue-500 font-mono text-[10px] outline-none">
+            </td>
+            <td class="p-2">
+                <input type="text" value="${item.user_agent || ''}"
+                oninput="workstack[${index}].user_agent=this.value"
+                class="w-full border border-slate-200 rounded px-2 py-1.5 focus:border-blue-500 text-[10px] outline-none"
+                placeholder="默认UA">
+            </td>
+            <td class="p-2 text-right whitespace-nowrap">
+                <button onclick="saveSingleRow(${index}, this)" class="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md font-bold hover:bg-blue-600 hover:text-white transition-all mr-2">写入</button>
+                <button onclick="removeWorkRow(${index})" class="text-slate-400 hover:text-red-500 px-2 font-bold">移除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// 移除一行
+function removeWorkRow(index) {
+    workstack.splice(index, 1);
+    renderWorkstack();
+}
+
+// 清空全部
+function clearWorkstack() {
+    if(confirm('确定清空当前预览列表吗？(不会影响数据库)')) {
+        workstack = [];
+        renderWorkstack();
+    }
+}
+
+// 单个写入
+async function saveSingleRow(index, btn) {
+    const rowData = workstack[index];
+    const oldText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = '转换中...';
+
+    try {
+        const r = await apiRequest('/api/tokens/import/single-save', {
+            method: 'POST',
+            body: JSON.stringify(rowData)
+        });
+
+        // 这里的 res 包含了后端 detail 里的信息
+        const res = await r.json();
+
+        if (r.ok && res.success) {
+            showToast(res.message, 'success');
+            removeWorkRow(index);
+            refreshTokens();
+        } else {
+            // 如果报错（比如 400），显示后端返回的 detail
+            alert("入库失败: " + (res.detail || "未知错误"));
+            btn.disabled = false;
+            btn.innerText = oldText;
+        }
+    } catch (e) {
+        showToast('请求异常: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.innerText = oldText;
+    }
+}
+
+// 批量一键写入所有
+async function batchSaveWorkstack() {
+    const count = workstack.length;
+    if (!confirm(`确定将当前列表中的 ${count} 个账号全部写入数据库吗？`)) return;
+
+    const btn = $('btnBatchConfirm');
+    btn.disabled = true;
+    btn.innerText = "正在批量处理...";
+
+    try {
+        const r = await apiRequest('/api/tokens/import/excel-confirm', {
+            method: 'POST',
+            body: JSON.stringify({ tokens: workstack })
+        });
+        const res = await r.json();
+        if (res.success) {
+            alert(res.message);
+            workstack = []; // 处理完清空内存
+            renderWorkstack();
+            refreshTokens();
+            switchTab('tokens'); // 自动跳到列表页
+        }
+    } catch (e) {
+        alert("批量保存失败: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "全部确认入库";
+    }
+}
+async function triggerAutoOnboard() {
+    const email = $('onboardEmail').value.trim();
+    if (!email) return showToast('请输入邮箱', 'error');
+
+    const btn = $('btnStartOnboard');
+    const statusBox = $('onboardStatus');
+    const statusText = $('onboardStatusText');
+
+    btn.disabled = true;
+    btn.innerText = '运行中...';
+    statusBox.classList.remove('hidden');
+    statusText.innerText = '正在本地/服务器拉起浏览器环境，请留意任务栏...';
+
+    try {
+        const r = await apiRequest('/api/tokens/onboard', {
+            method: 'POST',
+            body: JSON.stringify({ email: email })
+        });
+        const res = await r.json();
+
+        if (res.success) {
+            showToast(res.message, 'success');
+            // 注意：因为 Playwright 在后台跑，这里没法实时监控结束，
+            // 建议用户关注控制台日志或稍后手动刷新列表。
+            statusText.innerText = '环境已开启！请去弹出的窗口完成登录操作。';
+        } else {
+            alert("启动失败: " + res.detail);
+            btn.disabled = false;
+            btn.innerText = '启动自动环境';
+        }
+    } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.innerText = '启动自动环境';
+    }
+}
     </script>
 </body>
 </html>

@@ -11,6 +11,7 @@ class Token(BaseModel):
     name: Optional[str] = ""
     st: Optional[str] = None
     rt: Optional[str] = None
+    user_agent: Optional[str] = None
     client_id: Optional[str] = None
     proxy_url: Optional[str] = None
     remark: Optional[str] = None
